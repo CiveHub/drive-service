@@ -1,6 +1,7 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { DriveFile } from "./entities/file.entity";
+import { DriveFolder } from "./entities/folder.entity";
 
 @Injectable()
 export class TenantConnectionManager implements OnModuleDestroy {
@@ -37,7 +38,7 @@ export class TenantConnectionManager implements OnModuleDestroy {
       password:
         tenant.dbPassword || process.env.DATABASE_PASSWORD || "postgres",
       database: dbName,
-      entities: [DriveFile],
+      entities: [DriveFile, DriveFolder],
       synchronize: process.env.NODE_ENV !== "production", // Use migrations for production
       logging: process.env.NODE_ENV === "development",
       ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined,
