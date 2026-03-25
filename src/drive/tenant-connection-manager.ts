@@ -1,8 +1,6 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import { DataSource } from "typeorm";
-import { Project } from "../projects/entities/project.entity";
-import { Task } from "../projects/entities/task.entity";
-import { ProjectMember } from "../projects/entities/project-member.entity";
+import { DriveFile } from "./entities/file.entity";
 
 @Injectable()
 export class TenantConnectionManager implements OnModuleDestroy {
@@ -29,7 +27,7 @@ export class TenantConnectionManager implements OnModuleDestroy {
     // Development: use shared civehub_projects database (row-level isolation via tenant_id)
     // Production: set tenant.dbName to use per-tenant database for compliance isolation
     const dbName =
-      tenant.dbName || process.env.DATABASE_NAME || 'civehub_projects';
+      tenant.dbName || process.env.DATABASE_NAME || 'civehub_drive';
 
     const dataSource = new DataSource({
       type: "postgres",
@@ -39,7 +37,7 @@ export class TenantConnectionManager implements OnModuleDestroy {
       password:
         tenant.dbPassword || process.env.DATABASE_PASSWORD || "postgres",
       database: dbName,
-      entities: [Project, Task, ProjectMember],
+      entities: [DriveFile],
       synchronize: process.env.NODE_ENV !== "production", // Use migrations for production
       logging: process.env.NODE_ENV === "development",
       ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined,
