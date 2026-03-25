@@ -1,68 +1,99 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject } from '@nestjs/common';
+import { DriveFile } from './entities/file.entity';
+import { TenantConnectionManager } from './tenant-connection-manager';
+import { DataSource, Repository } from 'typeorm';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class DriveService {
-  private readonly welcomeFileName = 'Welcome_to_CiveHub_Drive.pdf';
-  
-  // Minimal valid PDF structure for "Welcome to CiveHub Drive"
-  private readonly welcomePdfBuffer = Buffer.from(
-    '%PDF-1.1\n' +
-    '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n' +
-    '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n' +
-    '3 0 obj << /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n' +
-    '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n' +
-    '5 0 obj << /Length 110 >> stream\n' +
-    'BT\n' +
-    '/F1 24 Tf\n' +
-    '100 700 Td\n' +
-    '(Welcome to CiveHub Drive) Tj\n' +
-    '0 -40 Td\n' +
-    '/F1 14 Tf\n' +
-    '(Your secure workplace for all team files.) Tj\n' +
-    'ET\n' +
-    'endstream\n' +
-    'endobj\n' +
-    'xref\n' +
-    '0 6\n' +
-    '0000000000 65535 f\n' +
-    '0000000009 00000 n\n' +
-    '0000000056 00000 n\n' +
-    '0000000111 00000 n\n' +
-    '0000000212 00000 n\n' +
-    '0000000289 00000 n\n' +
-    'trailer << /Size 6 /Root 1 0 R >>\n' +
-    'startxref\n' +
-    '449\n' +
-    '%%EOF'
-  );
+  private readonly storageRoot = process.env.STORAGE_ROOT || './uploads';
 
-  async findAll(tenantId: string, userId: string) {
-    // In a real app, this would fetch from a database (e.g. Postgres)
-    // For now, we return a hardcoded list for EVERY tenant
-    return [
-      {
-        id: 'welcome-file-id',
-        name: this.welcomeFileName,
-        size: this.welcomePdfBuffer.length,
-        type: 'application/pdf',
-        updatedAt: new Date().toISOString(),
-        owner: 'System',
-      },
-      {
-        id: 'proj-doc-id',
-        name: 'Project_Roadmap_Q3.docx',
-        size: 45000,
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        updatedAt: new Date().toISOString(),
-        owner: 'Admin',
-      }
-    ];
+  constructor(
+    private readonly connectionManager: TenantConnectionManager,
+  ) {
+    if (!fs.existsSync(this.storageRoot)) {
+      fs.mkdirSync(this.storageRoot, { recursive: true });
+    }
   }
 
-  async getFileBuffer(tenantId: string, fileId: string): Promise<{ buffer: Buffer; name: string }> {
-    if (fileId === 'welcome-file-id') {
-      return { buffer: this.welcomePdfBuffer, name: this.welcomeFileName };
+  private async getRepository(tenantId: string): Promise<Repository<DriveFile>> {
+    const ds = await this.connectionManager.getConnection({ id: tenantId });
+    return ds.getRepository(DriveFile);
+  }
+
+  async findAll(tenantId: string, userId: string): Promise<DriveFile[]> {
+    const repo = await this.getRepository(tenantId);
+    // Return all files for the tenant. In a team drive, everyone sees everything.
+    return repo.find({
+      where: { tenantId },
+      order: { updatedAt: 'DESC' },
+    });
+  }
+
+  async uploadFile(
+    tenantId: string,
+    userId: string,
+    file: { originalname: string; buffer: Buffer; mimetype: string; size: number }
+  ): Promise<DriveFile> {
+    const repo = await this.getRepository(tenantId);
+    
+    // Create tenant directory if it doesn't exist
+    const tenantDir = path.join(this.storageRoot, tenantId);
+    if (!fs.existsSync(tenantDir)) {
+      fs.mkdirSync(tenantDir, { recursive: true });
     }
-    throw new NotFoundException('File not found');
+
+    const fileId = crypto.randomUUID();
+    const fileName = `${fileId}-${file.originalname}`;
+    const filePath = path.join(tenantId, fileName);
+    const fullPath = path.join(this.storageRoot, filePath);
+
+    // Write to disk
+    fs.writeFileSync(fullPath, file.buffer);
+
+    // Save metadata
+    const newFile = repo.create({
+      id: fileId,
+      tenantId,
+      userId,
+      name: file.originalname,
+      size: file.size,
+      mimeType: file.mimetype,
+      path: filePath,
+    });
+
+    return repo.save(newFile);
+  }
+
+  async getFileBuffer(tenantId: string, fileId: string): Promise<{ buffer: Buffer; name: string; mimeType: string }> {
+    const repo = await this.getRepository(tenantId);
+    const file = await repo.findOne({ where: { id: fileId, tenantId } });
+    
+    if (!file) {
+      throw new NotFoundException('File not found');
+    }
+
+    const fullPath = path.join(this.storageRoot, file.path);
+    if (!fs.existsSync(fullPath)) {
+      throw new NotFoundException('File physical data missing');
+    }
+
+    const buffer = fs.readFileSync(fullPath);
+    return { buffer, name: file.name, mimeType: file.mimeType };
+  }
+
+  async deleteFile(tenantId: string, fileId: string): Promise<void> {
+    const repo = await this.getRepository(tenantId);
+    const file = await repo.findOne({ where: { id: fileId, tenantId } });
+    
+    if (!file) return;
+
+    const fullPath = path.join(this.storageRoot, file.path);
+    if (fs.existsSync(fullPath)) {
+      fs.unlinkSync(fullPath);
+    }
+
+    await repo.remove(file);
   }
 }
