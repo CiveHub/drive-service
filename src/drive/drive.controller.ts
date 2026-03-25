@@ -10,6 +10,9 @@ import {
   UploadedFile,
   UseInterceptors,
   Res,
+  Query,
+  Patch,
+  Body,
 } from "@nestjs/common";
 import { Response } from "express";
 import { FileInterceptor } from "@nestjs/platform-express";
@@ -23,8 +26,62 @@ export class DriveController {
   constructor(private readonly driveService: DriveService) {}
 
   @Get("files")
-  findAll(@TenantId() tenantId: string, @UserId() userId: string) {
-    return this.driveService.findAll(tenantId, userId);
+  findAll(
+    @TenantId() tenantId: string, 
+    @UserId() userId: string,
+    @Query("view") view?: string,
+    @Query("folderId") folderId?: string,
+  ) {
+    return this.driveService.findAll(tenantId, userId, view || 'all', folderId || null);
+  }
+
+  @Post("folders")
+  createFolder(
+    @TenantId() tenantId: string,
+    @UserId() userId: string,
+    @Body() dto: { name: string; parentId?: string },
+  ) {
+    return this.driveService.createFolder(tenantId, userId, dto.name, dto.parentId || null);
+  }
+
+  @Patch("files/:id")
+  updateFile(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+    @Body() dto: { name?: string; folderId?: string },
+  ) {
+    if (dto.name) {
+      return this.driveService.renameFile(tenantId, id, dto.name);
+    }
+    if (dto.hasOwnProperty('folderId')) {
+      return this.driveService.moveFile(tenantId, id, dto.folderId || null);
+    }
+    return { success: true };
+  }
+
+  @Patch("folders/:id")
+  updateFolder(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+    @Body() dto: { name: string },
+  ) {
+    return this.driveService.renameFolder(tenantId, id, dto.name);
+  }
+
+  @Post("files/:id/star")
+  toggleFileStar(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+  ) {
+    return this.driveService.toggleStar(tenantId, id, 'file');
+  }
+
+  @Post("folders/:id/star")
+  toggleFolderStar(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+  ) {
+    return this.driveService.toggleStar(tenantId, id, 'folder');
   }
 
   @Post("files/upload")

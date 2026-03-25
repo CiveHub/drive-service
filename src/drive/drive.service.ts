@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { DriveFile } from './entities/file.entity';
+import { DriveFolder } from './entities/folder.entity';
 import { TenantConnectionManager } from './tenant-connection-manager';
 import { DataSource, Repository } from 'typeorm';
 import * as fs from 'fs';
@@ -22,13 +23,88 @@ export class DriveService {
     return ds.getRepository(DriveFile);
   }
 
-  async findAll(tenantId: string, userId: string): Promise<DriveFile[]> {
+  private async getFolderRepository(tenantId: string): Promise<Repository<DriveFolder>> {
+    const ds = await this.connectionManager.getConnection({ id: tenantId });
+    return ds.getRepository(DriveFolder);
+  }
+
+  async findAll(
+    tenantId: string, 
+    userId: string, 
+    view: string = 'all', 
+    folderId: string | null = null
+  ): Promise<{ files: DriveFile[], folders: DriveFolder[] }> {
+    const fileRepo = await this.getRepository(tenantId);
+    const folderRepo = await this.getFolderRepository(tenantId);
+
+    const fileWhere: any = { tenantId };
+    const folderWhere: any = { tenantId };
+
+    if (view === 'starred') {
+      fileWhere.isStarred = true;
+      folderWhere.isStarred = true;
+    } else if (view === 'recent') {
+      // Logic for recent files (e.g., modified in last 7 days)
+      // For now, just order by updatedAt (already handled)
+    } else if (view === 'shared') {
+      fileWhere.isShared = true;
+    } else if (view === 'all') {
+      fileWhere.folderId = folderId;
+      folderWhere.parentId = folderId;
+    }
+
+    const [files, folders] = await Promise.all([
+      fileRepo.find({ where: fileWhere, order: { updatedAt: 'DESC' } }),
+      folderRepo.find({ where: folderWhere, order: { updatedAt: 'DESC' } }),
+    ]);
+
+    return { files, folders };
+  }
+
+  async createFolder(tenantId: string, userId: string, name: string, parentId: string | null = null): Promise<DriveFolder> {
+    const repo = await this.getFolderRepository(tenantId);
+    const folder = repo.create({ tenantId, userId, name, parentId });
+    return repo.save(folder);
+  }
+
+  async renameFile(tenantId: string, fileId: string, newName: string): Promise<DriveFile> {
     const repo = await this.getRepository(tenantId);
-    // Return all files for the tenant. In a team drive, everyone sees everything.
-    return repo.find({
-      where: { tenantId },
-      order: { updatedAt: 'DESC' },
-    });
+    const file = await repo.findOne({ where: { id: fileId, tenantId } });
+    if (!file) throw new NotFoundException('File not found');
+    file.name = newName;
+    return repo.save(file);
+  }
+
+  async renameFolder(tenantId: string, folderId: string, newName: string): Promise<DriveFolder> {
+    const repo = await this.getFolderRepository(tenantId);
+    const folder = await repo.findOne({ where: { id: folderId, tenantId } });
+    if (!folder) throw new NotFoundException('Folder not found');
+    folder.name = newName;
+    return repo.save(folder);
+  }
+
+  async toggleStar(tenantId: string, id: string, type: 'file' | 'folder'): Promise<any> {
+    if (type === 'file') {
+      const repo = await this.getRepository(tenantId);
+      const file = await repo.findOne({ where: { id, tenantId } });
+      if (!file) throw new NotFoundException('File not found');
+      file.isStarred = !file.isStarred;
+      return repo.save(file);
+    } else {
+      const repo = await this.getFolderRepository(tenantId);
+      const folder = await repo.findOne({ where: { id, tenantId } });
+      if (!folder) throw new NotFoundException('Folder not found');
+      folder.isStarred = !folder.isStarred;
+      return repo.save(folder);
+    }
+  }
+
+  async moveFile(tenantId: string, fileId: string, newFolderId: string | null): Promise<DriveFile> {
+    const repo = await this.getRepository(tenantId);
+    const file = await repo.findOne({ where: { id: fileId, tenantId } });
+    if (!file) throw new NotFoundException('File not found');
+    file.folderId = newFolderId;
+    return repo.save(file);
   }
 
   async uploadFile(

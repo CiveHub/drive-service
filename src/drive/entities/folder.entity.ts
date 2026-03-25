@@ -4,10 +4,13 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  ManyToOne,
+  OneToMany,
+  JoinColumn,
 } from "typeorm";
 
-@Entity("files")
-export class DriveFile {
+@Entity("folders")
+export class DriveFolder {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 
@@ -20,26 +23,18 @@ export class DriveFile {
   @Column({ type: "varchar", length: 255 })
   name: string;
 
-  @Column({ type: "integer" })
-  size: number;
+  @Column({ name: "parent_id", type: "uuid", nullable: true })
+  parentId: string | null;
 
-  @Column({ name: "mime_type", type: "varchar", length: 100 })
-  mimeType: string;
+  @ManyToOne(() => DriveFolder, (folder) => folder.children, { nullable: true })
+  @JoinColumn({ name: "parent_id" })
+  parent: DriveFolder;
 
-  @Column({ type: "varchar", length: 512 })
-  path: string;
-
-  @Column({ name: "is_public", type: "boolean", default: false })
-  isPublic: boolean;
+  @OneToMany(() => DriveFolder, (folder) => folder.parent)
+  children: DriveFolder[];
 
   @Column({ name: "is_starred", type: "boolean", default: false })
   isStarred: boolean;
-
-  @Column({ name: "is_shared", type: "boolean", default: false })
-  isShared: boolean;
-
-  @Column({ name: "folder_id", type: "uuid", nullable: true })
-  folderId: string | null;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
