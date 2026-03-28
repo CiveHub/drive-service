@@ -9,11 +9,30 @@ async function bootstrap() {
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
 
-  const corsOrigins =
-    process.env.CORS_ORIGINS?.split(",")
-      .map((o) => o.trim())
-      .filter(Boolean) ?? ["http://localhost:3000"];
-  app.enableCors({ origin: corsOrigins, credentials: true });
+  const domain = (process.env.DOMAIN || 'civehub.com').toLowerCase();
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      const lowerOrigin = origin.toLowerCase();
+      const isLocalhost = 
+        lowerOrigin.startsWith('http://localhost') || 
+        lowerOrigin.startsWith('http://127.0.0.1');
+      const isCiveHub = 
+        lowerOrigin.endsWith(`.${domain}`) || 
+        lowerOrigin === `https://${domain}` ||
+        lowerOrigin === `https://www.${domain}`;
+
+      if (isLocalhost || isCiveHub) {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
+    },
+    credentials: true,
+  });
 
   // Port should be unique for Drive Service (following patterns)
   const port = process.env.PORT || 3015;
